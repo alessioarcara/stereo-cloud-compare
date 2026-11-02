@@ -1,0 +1,6 @@
+# Large binaries are fetched by the scripts in scripts/, never committed.
+vendor/
+models/
+cert.pem
+key.pem
+__pycache__/

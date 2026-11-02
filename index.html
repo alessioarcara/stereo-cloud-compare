@@ -1,0 +1,820 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Stereo Cloud Compare</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: toolbar with the three actions (coppie, modelli, esegui); below it a narrow column for models and view
+   controls, and the main column with the scene strip, the calibration line, the viewport and the results table. */
+:root {
+  --bg: #eef0f3; --panel: #ffffff; --fg: #141821; --fg-2: #4b5363; --muted: #7c8494; --line: #d9dde5; --line-2: #c5cad4;
+  --accent: #2a78d6; --accent-soft: #e4eefb; --canvas: #e3e6eb; --ink-on-accent: #ffffff; --danger: #d03b3b;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948; --s0: #9a9a9a;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121418; --panel: #1b1e24; --fg: #eceef2; --fg-2: #b7bcc7; --muted: #8b919e; --line: #2d3139; --line-2: #3b404a;
+  --accent: #3987e5; --accent-soft: #1f2d42; --canvas: #0c0e12; --danger: #e66767;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767; --s0: #8a8a8a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121418; --panel: #1b1e24; --fg: #eceef2; --fg-2: #b7bcc7; --muted: #8b919e; --line: #2d3139; --line-2: #3b404a;
+  --accent: #3987e5; --accent-soft: #1f2d42; --canvas: #0c0e12; --danger: #e66767;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767; --s0: #8a8a8a; color-scheme: dark }
+* { box-sizing: border-box }
+html, body { height: 100% }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 14px; line-height: 1.45; display: flex; flex-direction: column; min-height: 100%;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 12px; gap: 12px }
+body.dropping::after { content: "Rilascia: immagini → scene, .onnx → modelli"; position: fixed; inset: 0; display: grid; place-items: center; font-size: 20px; font-weight: 500;
+  background: color-mix(in srgb, var(--accent) 12%, transparent); border: 3px dashed var(--accent); color: var(--fg); z-index: 20; pointer-events: none }
+/* toolbar */
+.bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px }
+.bar h1 { font-size: 16px; font-weight: 600; margin: 0 12px 0 0; white-space: nowrap }
+.bar .spacer { flex: 1 }
+.bar .opt { display: flex; align-items: center; gap: 6px; color: var(--fg-2); font-size: 13px }
+.progress { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; flex-basis: 100%; display: none }
+.progress.on { display: block }
+.progress > div { height: 100%; width: 0; background: var(--accent); transition: width .2s }
+.btn { font: inherit; font-size: 13px; background: var(--panel); color: var(--fg); border: 1px solid var(--line-2); border-radius: 7px; padding: 6px 12px; cursor: pointer; white-space: nowrap }
+.btn:hover { border-color: var(--accent) }
+.btn.primary { background: var(--accent); color: var(--ink-on-accent); border-color: var(--accent) }
+.btn.small { font-size: 12px; padding: 3px 8px }
+.btn.ghost { border-color: transparent; color: var(--fg-2) }
+.btn:disabled { opacity: .45; cursor: default }
+.btn[aria-pressed="true"] { background: var(--accent); color: var(--ink-on-accent); border-color: var(--accent) }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line-2); border-radius: 7px; overflow: hidden; max-width: 100% }
+.seg .btn { border: 0; border-radius: 0 }
+.seg .btn + .btn { border-left: 1px solid var(--line-2) }
+select, input[type="number"] { font: inherit; font-size: 13px; padding: 5px 7px; border: 1px solid var(--line-2); border-radius: 7px; background: var(--panel); color: var(--fg) }
+input[type="number"] { font-family: var(--mono); width: 92px }
+input[type="range"] { accent-color: var(--accent); width: 110px }
+.btn:focus-visible, input:focus-visible, select:focus-visible, .thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+/* columns */
+.app { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 12px; align-items: start; flex: 1 }
+@media (max-width: 900px) { .app { grid-template-columns: 1fr } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0 }
+.label { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px }
+.section + .section { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line) }
+.models { display: flex; flex-direction: column; gap: 6px }
+.model { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px }
+.model .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.model .meta { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.chip { width: 12px; height: 12px; border-radius: 3px; flex: none; display: inline-block; vertical-align: -1px }
+.x { font: inherit; font-size: 14px; line-height: 1; background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 5px; border-radius: 4px }
+.x:hover { color: var(--danger) }
+.empty { color: var(--muted); font-size: 13px; margin: 0; line-height: 1.4 }
+.ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px }
+.ctl label { color: var(--fg-2); font-size: 13px; display: flex; align-items: center; gap: 5px }
+.hint { color: var(--muted); font-size: 12px; margin: 8px 0 0; line-height: 1.4 }
+/* scene strip */
+.strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin }
+.thumb { flex: none; width: 150px; border: 2px solid var(--line); border-radius: 8px; background: var(--panel); padding: 0; cursor: pointer; text-align: left; font: inherit; color: var(--fg); position: relative; overflow: hidden }
+.thumb img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--canvas) }
+.thumb .cap { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 12px }
+.thumb .cap span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 }
+.thumb .cap b { font-family: var(--mono); font-weight: 500; color: var(--muted); font-size: 11px }
+.thumb[aria-pressed="true"] { border-color: var(--accent) }
+.thumb .x { position: absolute; top: 4px; right: 4px; background: var(--panel); border-radius: 50%; opacity: 0 }
+.thumb:hover .x, .thumb:focus-within .x { opacity: 1 }
+.calline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--fg-2) }
+.calline .lab { font-weight: 500; color: var(--fg); margin-right: 4px }
+.calline label { display: flex; align-items: center; gap: 5px }
+.calline input[type="number"] { width: 84px; padding: 4px 6px }
+/* viewport */
+.stage { position: relative; margin-top: 10px }
+canvas { display: block; width: 100%; height: 60vh; min-height: 300px; border-radius: 10px; background: var(--canvas); border: 1px solid var(--line); touch-action: none }
+.overlay { position: absolute; inset: 0; pointer-events: none; display: grid; place-items: center; text-align: center; color: var(--fg-2); padding: 24px }
+.overlay .box { max-width: 40ch; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; pointer-events: auto }
+.overlay .box p { margin: 6px 0 0; font-size: 13px; color: var(--muted) }
+.overlay .box strong { font-weight: 600; color: var(--fg) }
+.legend { position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none }
+.legend span { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px }
+.cols { position: absolute; left: 0; right: 0; top: 0; height: 0; pointer-events: none }
+.cols > span { position: absolute; top: 10px; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px }
+.status { position: absolute; right: 10px; bottom: 10px; font-family: var(--mono); font-size: 12px; color: var(--fg-2); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; pointer-events: none; max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+/* results */
+.tablewrap { overflow-x: auto; margin-top: 10px }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap }
+th { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 500 }
+td.num, th.num { text-align: right }
+tr.off td { color: var(--muted) }
+.note { color: var(--muted); font-size: 12px; margin: 8px 0 0; max-width: 100ch; line-height: 1.4 }
+.msg { font-size: 13px; color: var(--fg-2); margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch }
+.msg.err { color: var(--danger); white-space: normal }
+.maps { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 12px }
+.map { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel) }
+.map canvas { display: block; width: 100%; height: auto }
+.map .cap { display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-size: 12px }
+.map .cap span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 }
+.map .cap b { font-family: var(--mono); font-weight: 500; color: var(--muted); font-size: 11px }
+.ramp { display: inline-block; width: 90px; height: 8px; border-radius: 4px; vertical-align: middle; background: linear-gradient(90deg, #cde2fb, #3987e5, #104281) }
+.scale { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 10px; flex-wrap: wrap }
+input[type="radio"] { accent-color: var(--accent) }
+[hidden] { display: none !important }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <h1>Stereo Cloud Compare</h1>
+  <label class="btn" title="Immagini sinistra e destra rettificate, abbinate per nome (left/right, _L/_R) o a due a due; anche i file *_stereo_calibration.yaml">Aggiungi coppie <input id="add-scenes" type="file" accept="image/*,.yaml,.yml" multiple hidden></label>
+  <label class="btn" title="Modelli ONNX con ingressi left/right 1×3×H×W (RGB 0–255) e uscita disparità 1×1×H×W">Aggiungi ONNX <input id="add-models" type="file" accept=".onnx" multiple hidden></label>
+  <span class="opt"><label for="width" title="Larghezza di inferenza; l'altezza del canvas segue l'export del modello">Larghezza</label><select id="width"><option>384</option><option>512</option><option>640</option><option>768</option><option selected>960</option></select></span>
+  <span class="opt"><input type="checkbox" id="lr"><label for="lr" title="Seconda inferenza sulla coppia invertita: marca i punti coerenti entro 1 px">consistenza LR</label></span>
+  <button class="btn primary" id="run-all" type="button" title="Ogni modello su ogni scena alla larghezza scelta">Esegui tutto</button>
+  <span class="spacer"></span>
+  <p class="msg" id="run-msg"></p>
+  <div class="progress" id="progress"><div></div></div>
+</div>
+
+<div class="app">
+  <aside class="panel">
+    <div class="section">
+      <p class="label">Modelli</p>
+      <div class="models" id="models"></div>
+      <p class="empty" id="models-empty">Trascina file <code>.onnx</code> o usa "Aggiungi ONNX".</p>
+      <p class="hint" id="backend-hint"></p>
+      <div id="catalog" hidden>
+        <p class="label" style="margin-top:12px">Disponibili</p>
+        <div class="models" id="catalog-list"></div>
+      </div>
+      <div class="ctl"><label class="btn small ghost" title="Un file .npy float 2D per scena, con lo stesso prefisso dell'immagine sinistra: entra come modello precalcolato, per esempio una pseudo ground truth">Disparità .npy <input id="add-npy" type="file" accept=".npy" multiple hidden></label></div>
+    </div>
+    <div class="section">
+      <p class="label">Vista</p>
+      <div class="ctl"><div class="seg" id="layout">
+        <button class="btn small" type="button" data-v="overlay" aria-pressed="true" title="Tutte le nuvole nello stesso spazio">Sovrapposte</button>
+        <button class="btn small" type="button" data-v="split" aria-pressed="false" title="Una colonna per modello, stessa camera">Affiancate</button></div></div>
+      <div class="ctl"><div class="seg" id="colormode">
+        <button class="btn small" type="button" data-v="rgb" aria-pressed="true" title="Colore dell'immagine sinistra">Immagine</button>
+        <button class="btn small" type="button" data-v="model" aria-pressed="false" title="Un colore per modello">Modello</button>
+        <button class="btn small" type="button" data-v="depth" aria-pressed="false" title="Chiaro vicino, scuro lontano (5°–95° percentile)">Profondità</button>
+        <button class="btn small" type="button" data-v="diff" aria-pressed="false" title="Chiaro accordo con il riferimento, scuro scarto di 4 px o più">Δ rif.</button></div></div>
+      <div class="ctl"><label title="Nasconde i punti non coerenti tra sinistra e destra (richiede l'opzione consistenza LR)"><input type="checkbox" id="onlycons" checked> solo LR-consistenti</label></div>
+      <div class="ctl"><label for="psize">Punti</label><input type="range" id="psize" min="1" max="6" step="0.5" value="2.5"></div>
+      <div class="ctl">
+        <button class="btn small" type="button" data-view="front">Frontale</button>
+        <button class="btn small" type="button" data-view="top">Alto</button>
+        <button class="btn small" type="button" data-view="side">Lato</button>
+        <button class="btn small" type="button" data-view="iso">Obliqua</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="panel">
+    <p class="label">Scene</p>
+    <div class="strip" id="scenes"></div>
+    <p class="empty" id="scenes-empty">Trascina le immagini sinistra e destra (e i YAML di calibrazione) o usa "Aggiungi coppie".</p>
+    <p class="msg err" id="scenes-msg" hidden></p>
+    <div class="calline" id="calline" hidden>
+      <span class="lab" id="cal-name"></span>
+      <label title="Focale in pixel, riferita all'immagine originale (P1[0][0])">fx <input id="cal-fx" type="number" step="any" min="0" placeholder="px"></label>
+      <label title="Distanza tra le camere in metri (−P2[0][3] / P2[0][0])">baseline <input id="cal-b" type="number" step="any" min="0" placeholder="m"></label>
+      <label title="Centro ottico x in pixel (P1[0][2]); vuoto = centro immagine">cx <input id="cal-cx" type="number" step="any" placeholder="centro"></label>
+      <label title="Centro ottico y in pixel (P1[1][2]); vuoto = centro immagine">cy <input id="cal-cy" type="number" step="any" placeholder="centro"></label>
+      <label class="btn small ghost" title="fx, cx, cy da P1 e baseline da P2 (o T, Q) di un file *_stereo_calibration.yaml">Carica YAML <input id="cal-file" type="file" accept=".yaml,.yml" hidden></label>
+      <button class="btn small ghost" type="button" id="cal-all" title="Copia questa calibrazione su tutte le scene">Applica a tutte</button>
+      <span class="hint" style="margin:0" id="cal-src"></span>
+    </div>
+
+    <div class="stage">
+      <canvas id="gl" title="Trascina per ruotare, rotella o pizzico per zoomare, Maiusc + trascina per spostare"></canvas>
+      <div class="cols" id="cols"></div>
+      <div class="legend" id="legend"></div>
+      <div class="overlay" id="overlay"><div class="box" id="overlay-box"></div></div>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="tablewrap"><table id="stats">
+      <thead><tr><th></th><th title="Modello di riferimento per gli scarti">Rif.</th><th>Modello</th><th class="num">Inferenza</th><th>Backend</th><th class="num">Punti</th><th class="num">LR-consist.</th><th class="num">z mediana m</th><th class="num">z p5–p95 m</th><th class="num" title="Scarto medio di disparità rispetto al riferimento (EPE), pixel alla scala di inferenza">EPE vs rif.</th><th class="num" title="Frazione di pixel con scarto oltre 1 px">Bad-1</th><th class="num" title="Frazione di pixel con scarto oltre 3 px">Bad-3</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="scale" id="mapscale" hidden><span>Mappe di disparità alla scala di inferenza:</span><span>0 px</span><span class="ramp"></span><span id="mapmax"></span><label><input type="checkbox" id="mapsdiff"> mostra Δ vs riferimento (0–4 px)</label></div>
+    <div class="maps" id="maps"></div>
+    <p class="note">Scarti rispetto al modello di riferimento, sui pixel con disparità positiva in entrambi: disaccordo, non errore assoluto.</p>
+  </main>
+</div>
+
+<p class="hint" style="text-align:right;margin:0">Tutto gira nel browser: modelli e immagini non lasciano questo computer.</p>
+<script src="vendor/ort.all.min.js"></script>
+<script>
+(function () {
+  const MAX_POINTS = 250000;
+  const $ = id => document.getElementById(id);
+  const state = { scenes: [], models: [], results: {}, scene: null, enabled: new Set(), colorMode: 'rgb', layout: 'overlay', onlyConsistent: true, pointSize: 2.5,
+                  reference: null, gpu: {}, running: false, cam: { yaw: 0.6, pitch: 0.45, dist: 3, target: [0, 0, 0] } };
+  let prefs = {}; try { prefs = JSON.parse(localStorage.getItem('stereo-cloud-compare') || '{}'); } catch (e) { prefs = {}; }
+  const savePrefs = () => { try { localStorage.setItem('stereo-cloud-compare', JSON.stringify({ width: $('width').value, lr: $('lr').checked, layout: state.layout, colorMode: state.colorMode, onlyConsistent: state.onlyConsistent, pointSize: state.pointSize })); } catch (e) { /* storage unavailable */ } };
+  // Sequential blue ramp (light = low, dark = high) used for depth, disagreement and the 2D maps.
+  const RAMP = [[0xcd, 0xe2, 0xfb], [0x9e, 0xc5, 0xf4], [0x6d, 0xa7, 0xec], [0x39, 0x87, 0xe5], [0x25, 0x6a, 0xbf], [0x1c, 0x5c, 0xab], [0x10, 0x42, 0x81]];
+  function ramp(t) { t = Math.max(0, Math.min(1, t)) * (RAMP.length - 1); const i = Math.floor(t), f = t - i, a = RAMP[i], b = RAMP[Math.min(i + 1, RAMP.length - 1)]; return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]; }
+  const canvas = $('gl'), status = $('status');
+  const gl = canvas.getContext('webgl', { antialias: false });
+  if (!gl) { $('overlay-box').innerHTML = '<strong>WebGL non disponibile</strong><p>Questo browser non può disegnare le nuvole.</p>'; return; }
+
+  // ---------- renderer ----------
+  const vs = `attribute vec3 aPos; attribute vec3 aCol; attribute float aFlag;
+    uniform mat4 uMvp; uniform float uSize; uniform float uOnly; uniform float uMode; uniform vec3 uModelCol; varying vec3 vCol;
+    void main() { vCol = mix(aCol, uModelCol, uMode);
+      if (uOnly > 0.5 && aFlag < 0.5) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
+      gl_Position = uMvp * vec4(aPos, 1.0); gl_PointSize = uSize; }`;
+  const fs = `precision mediump float; varying vec3 vCol; void main() { gl_FragColor = vec4(vCol, 1.0); }`;
+  const sh = (t, src) => { const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+  const prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(prog); gl.useProgram(prog);
+  const loc = { pos: gl.getAttribLocation(prog, 'aPos'), col: gl.getAttribLocation(prog, 'aCol'), flag: gl.getAttribLocation(prog, 'aFlag'),
+    mvp: gl.getUniformLocation(prog, 'uMvp'), size: gl.getUniformLocation(prog, 'uSize'), only: gl.getUniformLocation(prog, 'uOnly'), mode: gl.getUniformLocation(prog, 'uMode'), mcol: gl.getUniformLocation(prog, 'uModelCol') };
+  gl.enable(gl.DEPTH_TEST);
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const norm = a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+  const perspective = (fovy, aspect, near, far) => { const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far); return [f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]; };
+  const lookAt = (eye, target, up) => { const z = norm(sub(eye, target)), x = norm(cross(up, z)), y = cross(z, x); return [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -dot(x, eye), -dot(y, eye), -dot(z, eye), 1]; };
+  const mul = (a, b) => { const o = new Array(16); for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) o[j * 4 + i] = a[i] * b[j * 4] + a[4 + i] * b[j * 4 + 1] + a[8 + i] * b[j * 4 + 2] + a[12 + i] * b[j * 4 + 3]; return o; };
+  const token = name => { const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim(); const n = parseInt(v.slice(1), 16); return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]; };
+  let bgCol = token('--canvas');
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { bgCol = token('--canvas'); draw(); });
+  const slotOf = modelId => { const i = state.models.findIndex(m => m.id === modelId); return i >= 0 && i < 8 ? i + 1 : 0; };
+  const modelOf = id => state.models.find(m => m.id === id);
+  function drawResult(r, x, y, w, h) {
+    gl.viewport(x, y, w, h); gl.scissor(x, y, w, h);
+    gl.clearColor(bgCol[0], bgCol[1], bgCol[2], 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    if (!r) return;
+    const c = state.cam, eye = [c.target[0] + c.dist * Math.cos(c.pitch) * Math.sin(c.yaw), c.target[1] + c.dist * Math.sin(c.pitch), c.target[2] + c.dist * Math.cos(c.pitch) * Math.cos(c.yaw)];
+    gl.uniformMatrix4fv(loc.mvp, false, new Float32Array(mul(perspective(50 * Math.PI / 180, w / h, 0.02, 200), lookAt(eye, c.target, [0, 1, 0]))));
+    for (const rr of (Array.isArray(r) ? r : [r])) {
+      const g = state.gpu[rr.key]; if (!g) continue;
+      const mc = token('--s' + slotOf(rr.model)); gl.uniform3f(loc.mcol, mc[0], mc[1], mc[2]);
+      const colBuf = state.colorMode === 'depth' ? g.colDepth : state.colorMode === 'diff' ? (g.colDiff || g.col) : g.col;
+      gl.bindBuffer(gl.ARRAY_BUFFER, g.pos); gl.enableVertexAttribArray(loc.pos); gl.vertexAttribPointer(loc.pos, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.enableVertexAttribArray(loc.col); gl.vertexAttribPointer(loc.col, 3, gl.UNSIGNED_BYTE, true, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, g.flag); gl.enableVertexAttribArray(loc.flag); gl.vertexAttribPointer(loc.flag, 1, gl.UNSIGNED_BYTE, false, 0, 0);
+      gl.drawArrays(gl.POINTS, 0, g.n);
+    }
+  }
+  function draw() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2), w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    gl.uniform1f(loc.size, state.pointSize * dpr); gl.uniform1f(loc.only, state.onlyConsistent ? 1 : 0); gl.uniform1f(loc.mode, state.colorMode === 'model' ? 1 : 0);
+    gl.enable(gl.SCISSOR_TEST);
+    const visible = sceneResults().filter(r => state.enabled.has(r.key) && state.gpu[r.key]);
+    const cols = $('cols'); cols.innerHTML = '';
+    if (state.layout === 'split' && visible.length > 1) {
+      const n = visible.length, cw = Math.floor(w / n), gap = Math.round(2 * dpr);
+      visible.forEach((r, i) => {
+        drawResult(r, i * cw + (i ? gap : 0), 0, cw - (i ? gap : 0), h);
+        const lab = document.createElement('span'); lab.style.left = `${(i + 0.5) * 100 / n}%`;
+        lab.innerHTML = `<i class="chip" style="background:var(--s${slotOf(r.model)})"></i>`; lab.appendChild(document.createTextNode(modelOf(r.model)?.name ?? '')); cols.appendChild(lab);
+      });
+      if (n * cw < w) { gl.viewport(n * cw, 0, w - n * cw, h); gl.scissor(n * cw, 0, w - n * cw, h); gl.clearColor(bgCol[0], bgCol[1], bgCol[2], 1); gl.clear(gl.COLOR_BUFFER_BIT); }
+    } else drawResult(visible, 0, 0, w, h);
+    gl.disable(gl.SCISSOR_TEST);
+    renderLegend(visible);
+  }
+  window.addEventListener('resize', draw);
+  function renderLegend(visible) {
+    const box = $('legend'); box.innerHTML = '';
+    if (state.layout === 'split' && visible.length > 1) return;
+    if (state.colorMode !== 'model' || visible.length < 2) return;
+    for (const r of visible) { const s = document.createElement('span'); s.innerHTML = `<span class="chip" style="background:var(--s${slotOf(r.model)})"></span>`; s.appendChild(document.createTextNode(modelOf(r.model)?.name ?? '')); box.appendChild(s); }
+  }
+  const mkBuf = arr => { const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW); return b; };
+  function toGpu(key, cloud, r) {
+    const n = cloud.n, pos = new Float32Array(n * 3), colDepth = new Uint8Array(n * 3); let sx = 0, sy = 0, sz = 0;
+    const lo = r.z_p05 ?? 0, hi = r.z_p95 ?? 1, span = hi - lo || 1;
+    for (let i = 0; i < n; i++) {
+      const x = cloud.xyz[i * 3], y = -cloud.xyz[i * 3 + 1], z = -cloud.xyz[i * 3 + 2]; pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z; sx += x; sy += y; sz += z;
+      const c = ramp((cloud.xyz[i * 3 + 2] - lo) / span); colDepth[i * 3] = c[0]; colDepth[i * 3 + 1] = c[1]; colDepth[i * 3 + 2] = c[2];
+    }
+    state.gpu[key] = { n, pos: mkBuf(pos), col: mkBuf(cloud.rgb), colDepth: mkBuf(colDepth), colDiff: null, flag: mkBuf(cloud.flag), centroid: [sx / n, sy / n, sz / n] };
+  }
+  // Disagreement with the reference model: per-pixel |Δd| on the shared inference grid, as table numbers and as a point color buffer.
+  function updateDiff(key) {
+    const r = state.results[key]; if (!r) return;
+    const ref = state.reference ? state.results[r.scene + '|' + state.reference] : null;
+    r.diff = null; if (state.gpu[key]) state.gpu[key].colDiff = null;
+    if (!ref || ref === r || ref.width !== r.width || ref.tl.H !== r.tl.H || ref.tl.nh !== r.tl.nh) return;
+    const { tl, width } = r, n = tl.nh * width; let sum = 0, over = 0, over3 = 0, cnt = 0;
+    for (let y = 0; y < tl.nh; y++) for (let x = 0; x < width; x++) { const a = r.disp[y * tl.W + x], b = ref.disp[y * tl.W + x]; if (a > 0 && b > 0) { const d = Math.abs(a - b); sum += d; cnt++; if (d > 1) over++; if (d > 3) over3++; } }
+    r.diff = { mae: cnt ? sum / cnt : null, over1: cnt ? over / cnt : null, over3: cnt ? over3 / cnt : null, covered: cnt / n };
+    if (state.gpu[key] && r.cloud) {
+      const c = r.cloud, col = new Uint8Array(c.n * 3);
+      for (let i = 0; i < c.n; i++) { const px = c.px[i], d = px >= 0 && ref.disp[px] > 0 ? Math.abs(r.disp[px] - ref.disp[px]) : 0, cc = ramp(d / 4); col[i * 3] = cc[0]; col[i * 3 + 1] = cc[1]; col[i * 3 + 2] = cc[2]; }
+      state.gpu[key].colDiff = mkBuf(col);
+    }
+  }
+
+  // ---------- camera ----------
+  const VIEWS = { front: [0, 0.05], top: [0, 1.45], side: [1.45, 0.05], iso: [0.6, 0.45] };
+  for (const b of document.querySelectorAll('[data-view]')) b.addEventListener('click', () => { const v = VIEWS[b.dataset.view]; state.cam.yaw = v[0]; state.cam.pitch = v[1]; draw(); });
+  const seg = (id, apply) => { for (const b of document.querySelectorAll('#' + id + ' .btn')) b.addEventListener('click', () => { for (const o of document.querySelectorAll('#' + id + ' .btn')) o.setAttribute('aria-pressed', o === b ? 'true' : 'false'); apply(b.dataset.v); draw(); }); };
+  seg('colormode', v => { state.colorMode = v; savePrefs(); }); seg('layout', v => { state.layout = v; savePrefs(); });
+  $('onlycons').addEventListener('change', e => { state.onlyConsistent = e.target.checked; savePrefs(); draw(); });
+  $('psize').addEventListener('input', e => { state.pointSize = parseFloat(e.target.value); savePrefs(); draw(); });
+  $('width').addEventListener('change', savePrefs); $('lr').addEventListener('change', savePrefs);
+  const pressSeg = (id, v) => { for (const o of document.querySelectorAll('#' + id + ' .btn')) o.setAttribute('aria-pressed', o.dataset.v === v ? 'true' : 'false'); };
+  if (prefs.width) $('width').value = prefs.width; if (prefs.lr != null) $('lr').checked = !!prefs.lr;
+  if (prefs.layout) { state.layout = prefs.layout; pressSeg('layout', prefs.layout); } if (prefs.colorMode) { state.colorMode = prefs.colorMode; pressSeg('colormode', prefs.colorMode); }
+  if (prefs.onlyConsistent != null) { state.onlyConsistent = !!prefs.onlyConsistent; $('onlycons').checked = state.onlyConsistent; } if (prefs.pointSize) { state.pointSize = prefs.pointSize; $('psize').value = prefs.pointSize; }
+
+  let drag = null;
+  canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, pan: e.shiftKey || e.button === 2 }; });
+  canvas.addEventListener('pointerup', () => { drag = null; });
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+  canvas.addEventListener('pointermove', e => {
+    if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY; const c = state.cam;
+    if (drag.pan) { const k = c.dist * 0.0015, right = [Math.cos(c.yaw), 0, -Math.sin(c.yaw)]; c.target[0] -= dx * k * right[0]; c.target[2] -= dx * k * right[2]; c.target[1] += dy * k; }
+    else { c.yaw -= dx * 0.006; c.pitch = Math.max(-1.5, Math.min(1.5, c.pitch + dy * 0.006)); }
+    draw();
+  });
+  canvas.addEventListener('wheel', e => { e.preventDefault(); state.cam.dist = Math.max(0.05, Math.min(100, state.cam.dist * Math.exp(e.deltaY * 0.0012))); draw(); }, { passive: false });
+  const touches = new Map();
+  canvas.addEventListener('touchstart', e => { for (const t of e.changedTouches) touches.set(t.identifier, [t.clientX, t.clientY]); }, { passive: true });
+  canvas.addEventListener('touchend', e => { for (const t of e.changedTouches) touches.delete(t.identifier); }, { passive: true });
+  canvas.addEventListener('touchmove', e => {
+    if (e.touches.length !== 2) return; e.preventDefault();
+    const [a, b] = [e.touches[0], e.touches[1]], pa = touches.get(a.identifier), pb = touches.get(b.identifier); if (!pa || !pb) return;
+    const d0 = Math.hypot(pa[0] - pb[0], pa[1] - pb[1]), d1 = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    state.cam.dist = Math.max(0.05, Math.min(100, state.cam.dist * (d0 / Math.max(d1, 1))));
+    const c = state.cam, k = c.dist * 0.0015, right = [Math.cos(c.yaw), 0, -Math.sin(c.yaw)], mx = (a.clientX + b.clientX - pa[0] - pb[0]) / 2, my = (a.clientY + b.clientY - pa[1] - pb[1]) / 2;
+    c.target[0] -= mx * k * right[0]; c.target[2] -= mx * k * right[2]; c.target[1] += my * k;
+    touches.set(a.identifier, [a.clientX, a.clientY]); touches.set(b.identifier, [b.clientX, b.clientY]); draw();
+  }, { passive: false });
+
+  // ---------- scenes ----------
+  function pairFiles(files) {
+    const sorted = [...files].filter(f => f.type.startsWith('image/')).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    const pairs = [], used = new Set();
+    const mates = name => [name.replace(/left/i, m => m[0] === 'L' ? 'Right' : 'right'), name.replace(/_L(?=[._-]|$)/, '_R'), name.replace(/-L(?=[._-]|$)/, '-R'), name.replace(/_l(?=[._-]|$)/, '_r')].filter(n => n !== name);
+    for (const f of sorted) {
+      if (used.has(f)) continue;
+      const mate = mates(f.name).map(n => sorted.find(g => g !== f && !used.has(g) && g.name === n)).find(Boolean);
+      if (mate) { pairs.push([f, mate]); used.add(f); used.add(mate); }
+    }
+    const byName = pairs.length, rest = sorted.filter(f => !used.has(f));
+    for (let i = 0; i + 1 < rest.length; i += 2) pairs.push([rest[i], rest[i + 1]]);
+    return { pairs, byName, leftover: rest.length % 2 ? rest[rest.length - 1] : null };
+  }
+  // "00_left_image_rect.png" -> "00", "cam_L.png" -> "cam": strip the side marker and common suffixes.
+  const sceneName = name => name.replace(/\.[^.]+$/, '').replace(/(^|[_-])(left|right|L|R)(?=[_-]|$)/i, '').replace(/[_-]?(image|img|rect|rectified)(?=[_-]|$)/gi, '').replace(/^[_-]+|[_-]+$/g, '') || name;
+  const loadImage = file => new Promise((resolve, reject) => { const img = new Image(), url = URL.createObjectURL(file); img.onload = () => resolve({ img, url }); img.onerror = () => reject(new Error('immagine non leggibile: ' + file.name)); img.src = url; });
+  async function addScenes(files) {
+    const { pairs, byName, leftover } = pairFiles(files);
+    const msg = $('scenes-msg'); msg.hidden = true; msg.textContent = '';
+    const problems = [];
+    for (const [lf, rf] of pairs) {
+      try {
+        const L = await loadImage(lf), R = await loadImage(rf);
+        if (L.img.naturalWidth !== R.img.naturalWidth || L.img.naturalHeight !== R.img.naturalHeight) { URL.revokeObjectURL(L.url); URL.revokeObjectURL(R.url); problems.push(`${lf.name} e ${rf.name}: dimensioni diverse`); continue; }
+        const last = state.scenes[state.scenes.length - 1];
+        state.scenes.push({ id: 's' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), name: sceneName(lf.name),
+          left: { ...L, file: lf }, right: { ...R, file: rf }, w: L.img.naturalWidth, h: L.img.naturalHeight, cal: last ? { ...last.cal, source: null } : { fx: null, baseline: null, cx: null, cy: null, source: null } });
+      } catch (err) { problems.push(err.message); }
+    }
+    if (leftover) problems.push(`${leftover.name}: nessuna immagine compagna`);
+    if (problems.length) { msg.textContent = problems.join(' · '); msg.hidden = false; }
+    if (pairs.length) $('run-msg').textContent = `${pairs.length} coppie aggiunte, ${byName} abbinate per nome.`;
+    if (!state.scene && state.scenes.length) state.scene = state.scenes[0].id;
+    renderScenes(); renderResults(); draw();
+  }
+  function renderScenes() {
+    const box = $('scenes'); box.innerHTML = ''; $('scenes-empty').hidden = state.scenes.length > 0;
+    for (const s of state.scenes) {
+      const el = document.createElement('div'); el.className = 'thumb'; el.tabIndex = 0; el.setAttribute('role', 'button'); el.setAttribute('aria-pressed', s.id === state.scene ? 'true' : 'false');
+      const img = document.createElement('img'); img.src = s.left.url; img.alt = '';
+      const cap = document.createElement('div'); cap.className = 'cap'; const nm = document.createElement('span'); nm.textContent = s.name; nm.title = s.name;
+      const done = state.models.filter(m => state.results[s.id + '|' + m.id]).length; const b = document.createElement('b'); b.textContent = state.models.length ? `${done}/${state.models.length}` : '';
+      cap.append(nm, b);
+      const x = document.createElement('button'); x.className = 'x'; x.type = 'button'; x.textContent = '×'; x.title = 'Rimuovi scena'; x.addEventListener('click', ev => { ev.stopPropagation(); removeScene(s); });
+      el.append(img, cap, x);
+      const pick = () => { state.scene = s.id; state.enabled = new Set(sceneResults().map(r => r.key)); renderScenes(); renderResults(); frameScene(); draw(); };
+      el.addEventListener('click', pick); el.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(); } });
+      box.appendChild(el);
+    }
+    renderCal();
+  }
+  function renderCal() {
+    const s = state.scenes.find(o => o.id === state.scene); $('calline').hidden = !s; if (!s) return;
+    $('cal-name').textContent = `${s.name} · ${s.w}×${s.h}`;
+    for (const [id, k] of [['cal-fx', 'fx'], ['cal-b', 'baseline'], ['cal-cx', 'cx'], ['cal-cy', 'cy']]) $(id).value = s.cal[k] ?? '';
+    $('cal-src').textContent = (s.cal.source ? 'da ' + s.cal.source : '') + (s.cal.doffs ? ` · doffs ${s.cal.doffs.toFixed(2)} px` : '');
+  }
+  for (const [id, k] of [['cal-fx', 'fx'], ['cal-b', 'baseline'], ['cal-cx', 'cx'], ['cal-cy', 'cy']]) $(id).addEventListener('change', e => {
+    const s = state.scenes.find(o => o.id === state.scene); if (!s) return;
+    s.cal[k] = e.target.value.trim() === '' ? null : parseFloat(e.target.value); s.cal.source = null; $('cal-src').textContent = '';
+    for (const key of Object.keys(state.results)) if (key.startsWith(s.id + '|')) recompute(key);
+    renderResults(); draw();
+  });
+  $('cal-all').addEventListener('click', () => { const s = state.scenes.find(o => o.id === state.scene); if (!s) return; for (const o of state.scenes) if (o !== s) { o.cal = { ...s.cal }; for (const key of Object.keys(state.results)) if (key.startsWith(o.id + '|')) recompute(key); } $('run-msg').textContent = 'Calibrazione copiata su tutte le scene.'; renderResults(); draw(); });
+  function removeScene(s) {
+    state.scenes = state.scenes.filter(o => o !== s); URL.revokeObjectURL(s.left.url); URL.revokeObjectURL(s.right.url);
+    for (const key of Object.keys(state.results)) if (key.startsWith(s.id + '|')) { delete state.results[key]; delete state.gpu[key]; }
+    if (state.scene === s.id) state.scene = state.scenes[0]?.id ?? null;
+    renderScenes(); renderResults(); draw();
+  }
+
+  // ---------- calibration YAML (P1/P2 of a rectified stereo pair; block or flow lists, or OpenCV matrices) ----------
+  function parseCalibrationYaml(text) {
+    const lines = text.split(/\r?\n/), blocks = {}; let key = null, cur = null;
+    const nums = str => (str.match(/-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?/g) || []).map(Number);
+    for (const raw of lines) {
+      const line = raw.replace(/#.*$/, '').replace(/\s+$/, ''); if (!line.trim()) continue;
+      const top = /^([A-Za-z_][\w]*):\s*(.*)$/.exec(line);
+      if (top && !/^\s/.test(line)) { key = top[1]; cur = blocks[key] = { rows: [], flat: [], text: top[2], props: {} }; if (top[2].trim().startsWith('[')) cur.flat = nums(top[2]); continue; }
+      if (!cur) continue;
+      const prop = /^\s+([A-Za-z_]\w*):\s*(.*)$/.exec(line);
+      if (prop) { cur.props[prop[1]] = prop[2].trim().startsWith('[') ? nums(prop[2]) : (nums(prop[2])[0] ?? prop[2]); continue; }
+      if (/^\s*-\s+-/.test(line)) { cur.rows.push(nums(line)); continue; }            // "- - x": new row
+      if (/^\s*-\s/.test(line) && cur.rows.length && !/^-/.test(line)) { cur.rows[cur.rows.length - 1].push(...nums(line)); continue; }  // "  - x": same row
+      if (/^\s*-\s/.test(line)) { cur.flat.push(...nums(line)); continue; }            // "- x": flat list
+      if (/^\s*[-\d]/.test(line)) cur.flat.push(...nums(line));                        // continuation of a flow list
+    }
+    const matrix = name => { const b = blocks[name]; if (!b) return null;
+      if (b.rows.length) return b.rows;
+      const data = b.props.data || b.flat; const cols = b.props.cols || (name.startsWith('P') ? 4 : name === 'T' ? 1 : 3);
+      if (!data || !data.length) return null; const rows = []; for (let i = 0; i < data.length; i += cols) rows.push(data.slice(i, i + cols)); return rows; };
+    const P1 = matrix('P1'), P2 = matrix('P2'), T = matrix('T'), Q = matrix('Q');
+    let fx = null, cx = null, cy = null, baseline = null, doffs = 0;
+    if (P1 && P1[0] && P1[1]) { fx = P1[0][0]; cx = P1[0][2]; cy = P1[1][2]; }
+    if (P1 && P2 && P2[0] && P2[0][2] != null && P1[0][2] != null) doffs = P2[0][2] - P1[0][2];
+    if (P2 && P2[0] && P2[0][3] != null && P2[0][0]) baseline = -P2[0][3] / P2[0][0];
+    if (baseline == null && T) baseline = Math.abs(T.flat()[0]);
+    if ((fx == null || cx == null) && Q && Q[2] && Q[3]) { fx = fx ?? Q[2][3]; cx = cx ?? -Q[0][3]; cy = cy ?? -Q[1][3]; baseline = baseline ?? 1 / Math.abs(Q[3][2]); }
+    if (!(fx > 0) || baseline == null) throw new Error('nel YAML mancano P1/P2 (o T, Q)');
+    let note = '';
+    if (baseline > 10) { baseline /= 1000; note = ' (baseline letta in mm e convertita)'; }
+    return { fx, cx, cy, baseline: Math.abs(baseline), doffs, note };
+  }
+  const prefixOf = name => name.replace(/\.[^.]+$/, '').replace(/_?stereo_calibration$/i, '').replace(/_?(left|right|L|R)(_image)?(_rect)?$/i, '').replace(/_?left_?/i, '');
+  async function addCalibrations(files, target) {
+    const msgs = [];
+    for (const f of files) {
+      try {
+        const cal = parseCalibrationYaml(await f.text());
+        const pre = prefixOf(f.name);
+        let scene = target || state.scenes.find(sc => prefixOf(sc.left.file.name) === pre) || state.scenes.find(sc => sc.left.file.name.startsWith(pre + '_'));
+        if (!scene && state.scenes.length === 1) scene = state.scenes[0];
+        if (!scene) { msgs.push(`${f.name}: nessuna scena con prefisso "${pre}"`); continue; }
+        scene.cal = { fx: cal.fx, baseline: cal.baseline, cx: cal.cx, cy: cal.cy, doffs: cal.doffs || 0, source: f.name };
+        for (const key of Object.keys(state.results)) if (key.startsWith(scene.id + '|')) recompute(key);
+        msgs.push(`${scene.name}: fx ${cal.fx.toFixed(2)}, baseline ${cal.baseline.toFixed(4)} m${cal.note}`);
+      } catch (err) { msgs.push(`${f.name}: ${err.message}`); }
+    }
+    if (msgs.length) $('run-msg').textContent = msgs.join(' · ');
+    renderCal(); renderResults(); draw();
+  }
+  $('cal-file').addEventListener('change', e => { const s = state.scenes.find(o => o.id === state.scene); if (s) addCalibrations([...e.target.files], s); e.target.value = ''; });
+
+  // ---------- ONNX input shape, read from the file's protobuf without any library ----------
+  function onnxInputs(buf) {
+    const b = new Uint8Array(buf);
+    const varint = pos => { let v = 0, shift = 0, p = pos; while (true) { const c = b[p++]; v += (c & 0x7f) * 2 ** shift; shift += 7; if (!(c & 0x80)) break; } return [v, p]; };
+    const fields = (start, end, want) => {  // yields [field, payloadStart, payloadEnd] for length-delimited fields and [field, value] for varints
+      const out = []; let p = start;
+      while (p < end) { let tag; [tag, p] = varint(p); const f = tag >>> 3, wt = tag & 7;
+        if (wt === 0) { let v; [v, p] = varint(p); if (!want || want.has(f)) out.push([f, v]); }
+        else if (wt === 2) { let len; [len, p] = varint(p); if (!want || want.has(f)) out.push([f, p, p + len]); p += len; }
+        else if (wt === 1) p += 8; else if (wt === 5) p += 4; else break; }
+      return out;
+    };
+    const text = (s, e) => new TextDecoder().decode(b.subarray(s, e));
+    const inputs = [];
+    for (const g of fields(0, b.length, new Set([7]))) {
+      if (g.length < 3) continue;
+      const initNames = new Set();
+      for (const it of fields(g[1], g[2], new Set([5]))) { const nm = fields(it[1], it[2], new Set([1]))[0]; if (nm && nm.length === 3) initNames.add(text(nm[1], nm[2])); }
+      for (const vi of fields(g[1], g[2], new Set([11]))) {
+        let name = '', dims = null;
+        for (const f of fields(vi[1], vi[2])) {
+          if (f[0] === 1 && f.length === 3) name = text(f[1], f[2]);
+          if (f[0] === 2 && f.length === 3) for (const tt of fields(f[1], f[2], new Set([1]))) for (const sh of fields(tt[1], tt[2], new Set([2]))) {
+            dims = fields(sh[1], sh[2], new Set([1])).map(d => { const inner = fields(d[1], d[2]); const v = inner.find(x => x[0] === 1 && x.length === 2); return v ? v[1] : null; }); }
+        }
+        if (name && !initNames.has(name)) inputs.push({ name, dims });
+      }
+    }
+    return inputs;
+  }
+  async function detectShape(m) {
+    try {
+      // Whole file: the graph inputs can sit after hundreds of MB of initializers; the scan only hops over them.
+      const inputs = onnxInputs(await m.file.arrayBuffer());
+      const img = inputs.find(i => i.dims && i.dims.length === 4);
+      if (img && img.dims[2] > 0 && img.dims[3] > 0) { m.height = img.dims[2]; m.width = img.dims[3]; m.fixed = true; }
+      else if (img) m.fixed = false;
+      m.inputs = inputs.length;
+    } catch (e) { /* unreadable header: the session will tell */ }
+  }
+
+  // ---------- models ----------
+  function addModels(files, meta) {
+    let n = 0;
+    const added = [];
+    for (const f of files) if (/\.onnx$/i.test(f.name)) { const m = { id: 'm' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), name: (meta && meta.name) || f.name.replace(/\.onnx$/i, ''), file: f, session: null, backend: null, width: meta && meta.width, height: meta && meta.height, note: meta && meta.note }; state.models.push(m); added.push(m); n++; }
+    if (n) $('run-msg').textContent = `${n} modelli aggiunti.`;
+    if (!state.reference && state.models.length) state.reference = state.models[0].id;
+    renderModels(); renderScenes(); renderResults();
+    Promise.all(added.map(detectShape)).then(() => { renderModels(); renderResults(); });
+  }
+  function renderModels() {
+    const box = $('models'); box.innerHTML = ''; $('models-empty').hidden = state.models.length > 0;
+    for (const m of state.models) {
+      const el = document.createElement('div'); el.className = 'model';
+      const chip = document.createElement('span'); chip.className = 'chip'; chip.style.background = 'var(--s' + slotOf(m.id) + ')';
+      const text = document.createElement('div'); const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = m.name; nm.title = m.name;
+      const meta = document.createElement('div'); meta.className = 'meta'; meta.textContent = m.precomputed ? 'disparità precalcolate' : `${(m.file.size / 2 ** 20).toFixed(1)} MiB${m.fixed ? ' · ' + m.height + '×' + m.width + ' fisso' : m.fixed === false ? ' · dinamico' : m.width ? ' · ' + (m.height ? m.height + '×' : '') + m.width : ''}${m.backend ? ' · ' + m.backend : ''}`; text.append(nm, meta);
+      const x = document.createElement('button'); x.className = 'x'; x.type = 'button'; x.textContent = '×'; x.title = 'Rimuovi modello';
+      x.addEventListener('click', () => { state.models = state.models.filter(o => o !== m); if (m.session && m.session.release) m.session.release(); for (const key of Object.keys(state.results)) if (key.endsWith('|' + m.id)) { delete state.results[key]; delete state.gpu[key]; }
+        if (state.reference === m.id) { state.reference = state.models[0]?.id ?? null; for (const key of Object.keys(state.results)) updateDiff(key); } renderModels(); renderScenes(); renderResults(); draw(); });
+      el.append(chip, text, x); box.appendChild(el);
+    }
+  }
+
+  // ---------- catalogue of models served next to the app ----------
+  async function loadCatalog() {
+    let cat; try { const r = await fetch('models/index.json', { cache: 'no-cache' }); if (!r.ok) return; cat = await r.json(); } catch (e) { return; }
+    const list = $('catalog-list'); list.innerHTML = ''; $('catalog').hidden = !(cat.models && cat.models.length);
+    for (const entry of cat.models || []) {
+      const el = document.createElement('div'); el.className = 'model';
+      const text = document.createElement('div'); const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = entry.name; nm.title = entry.file;
+      const meta = document.createElement('div'); meta.className = 'meta'; meta.textContent = [entry.width ? (entry.height ? entry.height + '×' : 'larghezza ') + entry.width : '', entry.size_mb ? entry.size_mb + ' MB' : '', entry.note || ''].filter(Boolean).join(' · '); text.append(nm, meta);
+      const b = document.createElement('button'); b.className = 'btn small'; b.type = 'button'; b.textContent = 'carica';
+      fetch('models/' + entry.file, { method: 'HEAD' }).then(r => { if (!r.ok) { b.disabled = true; b.textContent = 'assente'; b.title = 'File non presente in models/: esegui python3 scripts/setup.py'; meta.textContent = 'non scaricato · python3 scripts/setup.py'; } }).catch(() => {});
+      b.addEventListener('click', async () => {
+        b.disabled = true; b.textContent = '0 %';
+        try {
+          const r = await fetch('models/' + entry.file); if (!r.ok) throw new Error(r.status === 404 ? 'file non presente in models/, esegui python3 scripts/setup.py' : 'HTTP ' + r.status);
+          const total = +r.headers.get('content-length') || 0, chunks = []; let got = 0; const reader = r.body.getReader();
+          while (true) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); got += value.length; if (total) b.textContent = Math.round(100 * got / total) + ' %'; }
+          const blob = new Blob(chunks); const file = new File([blob], entry.file, { type: 'application/octet-stream' });
+          addModels([file], entry);
+          if (entry.width && [...$('width').options].some(o => o.value === String(entry.width))) { $('width').value = String(entry.width); savePrefs(); }
+          b.textContent = 'caricato';
+        } catch (err) { b.disabled = false; b.textContent = 'carica'; $('run-msg').textContent = entry.file + ': ' + err.message; }
+      });
+      el.append(document.createElement('span'), text, b); list.appendChild(el);
+    }
+  }
+  loadCatalog();
+
+  // ---------- precomputed disparities (.npy float 2D, one per scene, matched by name prefix) ----------
+  function parseNpy(buf) {
+    const bytes = new Uint8Array(buf);
+    if (!(bytes[0] === 0x93 && String.fromCharCode(...bytes.subarray(1, 6)) === 'NUMPY')) throw new Error('non è un file .npy');
+    const major = bytes[6], dv0 = new DataView(buf), hlen = major === 1 ? dv0.getUint16(8, true) : dv0.getUint32(8, true), hstart = major === 1 ? 10 : 12;
+    const header = new TextDecoder('latin1').decode(bytes.subarray(hstart, hstart + hlen));
+    const descr = /'descr':\s*'([^']+)'/.exec(header)[1], fortran = /'fortran_order':\s*(True|False)/.exec(header)[1] === 'True';
+    const shape = /'shape':\s*\(([^)]*)\)/.exec(header)[1].split(',').map(v => v.trim()).filter(Boolean).map(Number);
+    if (shape.length !== 2 || fortran) throw new Error('serve un array 2D in ordine C');
+    const le = descr[0] !== '>', kind = descr.slice(1), [h, w] = shape, dv = new DataView(buf, hstart + hlen), data = new Float32Array(h * w);
+    const rd = { f4: o => dv.getFloat32(o, le), f8: o => dv.getFloat64(o, le), u2: o => dv.getUint16(o, le), i2: o => dv.getInt16(o, le), i4: o => dv.getInt32(o, le) }[kind], sz = { f4: 4, f8: 8, u2: 2, i2: 2, i4: 4 }[kind];
+    if (!rd) throw new Error('dtype non supportato ' + descr);
+    for (let i = 0; i < h * w; i++) data[i] = rd(i * sz);
+    return { h, w, data };
+  }
+  async function addPrecomputed(files) {
+    let model = state.models.find(m => m.precomputed);
+    if (!model) { model = { id: 'm' + Date.now() + '-pre', name: 'precalcolato', precomputed: true, file: { size: 0 }, session: null, backend: 'file' }; state.models.push(model); if (!state.reference) state.reference = model.id; }
+    const msgs = [], width = parseInt($('width').value, 10);
+    for (const f of files) {
+      try {
+        const npy = parseNpy(await f.arrayBuffer()), pre = prefixOf(f.name);
+        const scene = state.scenes.find(sc => prefixOf(sc.left.file.name) === pre) || state.scenes.find(sc => sc.left.file.name.startsWith(pre + '_')) || (state.scenes.length === 1 ? state.scenes[0] : null);
+        if (!scene) { msgs.push(`${f.name}: nessuna scena con prefisso "${pre}"`); continue; }
+        // Resample the map to the app's inference grid so it is comparable with the ONNX results.
+        const gridModel = state.models.find(m => !m.precomputed && m.height);
+        const tl = preprocess(scene.left.img, width, gridModel ? gridModel.height : undefined), disp = new Float32Array(tl.H * tl.W), sx = npy.w / width, sy = npy.h / tl.nh, sd = width / npy.w;
+        for (let y = 0; y < tl.nh; y++) for (let x = 0; x < width; x++) { const v = npy.data[Math.min(npy.h - 1, Math.round(y * sy)) * npy.w + Math.min(npy.w - 1, Math.round(x * sx))]; disp[y * tl.W + x] = v > 0 && isFinite(v) ? v * sd : 0; }
+        state.results[scene.id + '|' + model.id] = { key: scene.id + '|' + model.id, scene: scene.id, model: model.id, width, disp, flag: null, tl, ms: 0, backend: 'file', withLr: false };
+        recompute(scene.id + '|' + model.id); state.enabled.add(scene.id + '|' + model.id);
+        msgs.push(`${scene.name}: ${npy.w}×${npy.h} → ${width}`);
+      } catch (err) { msgs.push(`${f.name}: ${err.message}`); }
+    }
+    $('run-msg').textContent = msgs.join(' · ');
+    renderModels(); renderScenes(); renderResults(); frameScene(); draw();
+  }
+  $('add-npy').addEventListener('change', e => { addPrecomputed([...e.target.files]); e.target.value = ''; });
+
+  // ---------- file inputs and drag & drop ----------
+  const isYaml = f => /\.ya?ml$/i.test(f.name);
+  $('add-scenes').addEventListener('change', async e => { const files = [...e.target.files]; e.target.value = ''; await addScenes(files.filter(f => !isYaml(f))); const y = files.filter(isYaml); if (y.length) addCalibrations(y); });
+  $('add-models').addEventListener('change', e => { addModels(e.target.files); e.target.value = ''; });
+  let dragDepth = 0;
+  document.addEventListener('dragenter', e => { e.preventDefault(); if (++dragDepth === 1) document.body.classList.add('dropping'); });
+  document.addEventListener('dragleave', e => { e.preventDefault(); if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dropping'); } });
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', e => {
+    e.preventDefault(); dragDepth = 0; document.body.classList.remove('dropping');
+    const files = [...e.dataTransfer.files];
+    addModels(files.filter(f => /\.onnx$/i.test(f.name)));
+    const images = files.filter(f => f.type.startsWith('image/')), yamls = files.filter(isYaml), npys = files.filter(f => /\.npy$/i.test(f.name));
+    (images.length ? addScenes(images) : Promise.resolve()).then(() => { if (yamls.length) addCalibrations(yamls); if (npys.length) addPrecomputed(npys); });
+  });
+
+  // ---------- inference ----------
+  ort.env.wasm.wasmPaths = new URL('vendor/', document.baseURI).href;
+  if (location.protocol === 'file:') { const m = $('run-msg'); m.textContent = 'Pagina aperta da file://: i moduli wasm non si caricano. Avviala con "python3 serve.py" nella cartella webapp e apri http://localhost:8000/.'; m.classList.add('err'); }
+  const bh = $('backend-hint'), threads = crossOriginIsolated ? 'multithread' : '1 thread';
+  if (navigator.gpu) { bh.textContent = `Backend: WebGPU, ripiego CPU WASM (${threads}).`; bh.title = ''; }
+  else if (!window.isSecureContext) { bh.textContent = `Backend: CPU WASM (${threads}); WebGPU bloccato dal contesto non sicuro.`; bh.title = 'WebGPU richiede http://localhost o https, non un indirizzo IP o un nome host in http.'; }
+  else { bh.textContent = `Backend: CPU WASM (${threads}); WebGPU non esposto dal browser.`; bh.title = 'Chrome/Edge su Linux: chrome://flags/#enable-unsafe-webgpu e #enable-vulkan, poi riavvia. Firefox e Safari non lo attivano di default.'; }
+  if (!crossOriginIsolated) bh.title += (bh.title ? ' ' : '') + 'Più thread WASM richiedono le intestazioni COOP/COEP (serve.py le imposta).';
+  async function getSession(m) {
+    if (m.session) return m.session;
+    const bytes = await m.file.arrayBuffer();
+    if (navigator.gpu) { try { m.session = await ort.InferenceSession.create(bytes, { executionProviders: ['webgpu'], graphOptimizationLevel: 'all' }); m.backend = 'webgpu'; } catch (e) { m.backend = null; $('run-msg').textContent = 'WebGPU rifiutato per ' + m.name + ' (' + (e.message || e).toString().slice(0, 80) + '); uso la CPU.'; } }
+    if (!m.session) { m.session = await ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' }); m.backend = 'wasm ×' + (ort.env.wasm.numThreads || 1); }
+    if (m.session.inputNames.length !== 2) throw new Error(m.name + ': servono 2 ingressi, trovati ' + m.session.inputNames.length);
+    renderModels();
+    return m.session;
+  }
+  // Mirrors the benchmark preprocessing: proportional resize to the width, replicate padding to the common canvas (multiples of 32), RGB float 0–255, NCHW.
+  function preprocess(img, width, height) {
+    let nh = Math.round(img.naturalHeight * width / img.naturalWidth);
+    const H = height || Math.max(Math.ceil((width * 1216 / 1936) / 32) * 32, Math.ceil(nh / 32) * 32);
+    if (height && nh > height) nh = height;  // taller than the fixed canvas: content is scaled to fit the height, width stays the model's
+    const W = width + (32 - width % 32) % 32;
+    const c = document.createElement('canvas'); c.width = width; c.height = nh;
+    const ctx = c.getContext('2d'); ctx.imageSmoothingQuality = 'high'; ctx.drawImage(img, 0, 0, width, nh);
+    const px = ctx.getImageData(0, 0, width, nh).data, data = new Float32Array(3 * H * W);
+    for (let y = 0; y < H; y++) { const sy = Math.min(y, nh - 1); for (let x = 0; x < W; x++) { const sx = Math.min(x, width - 1), o = (sy * width + sx) * 4;
+      data[y * W + x] = px[o]; data[H * W + y * W + x] = px[o + 1]; data[2 * H * W + y * W + x] = px[o + 2]; } }
+    return { data, H, W, nh, width, px };
+  }
+  const flipped = t => { const out = new Float32Array(t.data.length); for (let ch = 0; ch < 3; ch++) for (let y = 0; y < t.H; y++) for (let x = 0; x < t.W; x++) out[ch * t.H * t.W + y * t.W + x] = t.data[ch * t.H * t.W + y * t.W + (t.W - 1 - x)]; return out; };
+  async function infer(session, left, right, H, W) {
+    const [a, b] = session.inputNames;
+    const out = await session.run({ [a]: new ort.Tensor('float32', left, [1, 3, H, W]), [b]: new ort.Tensor('float32', right, [1, 3, H, W]) });
+    const t = out[session.outputNames[0]];
+    if (t.dims.length !== 4 || t.dims[2] !== H || t.dims[3] !== W) throw new Error('uscita ' + JSON.stringify(t.dims) + ', attesa [1,c,' + H + ',' + W + ']');
+    return Float32Array.from(t.data.subarray(0, H * W));
+  }
+  async function runPair(s, m, width, withLr) {
+    const key = s.id + '|' + m.id, session = await getSession(m);
+    const grid = gridFor(m, width); width = grid.width;
+    const tl = preprocess(s.left.img, width, grid.height), tr = preprocess(s.right.img, width, grid.height);
+    const t0 = performance.now(), disp = await infer(session, tl.data, tr.data, tl.H, tl.W), ms = performance.now() - t0;
+    let flag = null;
+    if (withLr) {
+      const rev = await infer(session, flipped(tr), flipped(tl), tl.H, tl.W);
+      flag = new Uint8Array(tl.H * tl.W);
+      for (let y = 0; y < tl.nh; y++) for (let x = 0; x < width; x++) {
+        const d = disp[y * tl.W + x], xr = x - d; if (!(d > 0) || xr < 0 || xr > width - 1) continue;
+        const x0 = Math.floor(xr), f = xr - x0, x1 = Math.min(x0 + 1, width - 1);
+        const dr = rev[y * tl.W + (tl.W - 1 - x0)] * (1 - f) + rev[y * tl.W + (tl.W - 1 - x1)] * f;
+        if (dr > 0 && Math.abs(d - dr) <= 1) flag[y * tl.W + x] = 1;
+      }
+    }
+    state.results[key] = { key, scene: s.id, model: m.id, width, height: tl.H, disp, flag, tl, ms, backend: m.backend, withLr };
+    recompute(key);
+    state.enabled.add(key);
+  }
+  // Disparity to a calibrated cloud; rerun when the scene calibration changes without a new inference.
+  function recompute(key) {
+    const r = state.results[key], s = state.scenes.find(o => o.id === r.scene); if (!r || !s) return;
+    const { disp, flag, tl, width } = r, sc = width / s.w, calibrated = !!(s.cal.fx > 0 && s.cal.baseline > 0);
+    const fx = (calibrated ? s.cal.fx : 1000) * sc, b = calibrated ? s.cal.baseline : 0.1;
+    const cx = ((s.cal.cx ?? (s.w - 1) / 2) + 0.5) * sc - 0.5, cy = ((s.cal.cy ?? (s.h - 1) / 2) + 0.5) * sc - 0.5, doffs = (s.cal.doffs || 0) * sc;
+    const stride = Math.max(1, Math.ceil(Math.sqrt(tl.nh * width / MAX_POINTS)));
+    const xyz = [], rgb = [], flags = [], pxs = [];
+    for (let y = 0; y < tl.nh; y += stride) for (let x = 0; x < width; x += stride) {
+      const d = disp[y * tl.W + x]; if (!(d > 0) || !isFinite(d)) continue;
+      const z = fx * b / (d + doffs); xyz.push((x - cx) * z / fx, (y - cy) * z / fx, z);
+      const o = (y * width + x) * 4; rgb.push(tl.px[o], tl.px[o + 1], tl.px[o + 2]); flags.push(flag ? flag[y * tl.W + x] : 1); pxs.push(y * tl.W + x);
+    }
+    const n = xyz.length / 3, cloud = { n, xyz: Float32Array.from(xyz), rgb: Uint8Array.from(rgb), flag: Uint8Array.from(flags), px: Int32Array.from(pxs) };
+    const zs = Array.from({ length: n }, (_, i) => cloud.xyz[i * 3 + 2]).sort((a, b2) => a - b2), q = p => n ? zs[Math.min(n - 1, Math.floor(p * n))] : null;
+    let cons = 0; for (let i = 0; i < n; i++) cons += cloud.flag[i];
+    const ds = Array.from(disp.subarray(0, tl.nh * tl.W)).filter(v => v > 0).sort((a, b2) => a - b2);
+    Object.assign(r, { cloud, points: n, consistent: flag ? cons : null, z_median: q(0.5), z_p05: q(0.05), z_p95: q(0.95), calibrated, d_p98: ds.length ? ds[Math.floor(0.98 * (ds.length - 1))] : 0, map: null, mapDiff: null });
+    delete state.gpu[key]; if (n) toGpu(key, cloud, r);
+    for (const k of Object.keys(state.results)) if (k.startsWith(r.scene + '|')) updateDiff(k);
+  }
+  // Each model runs on its own fixed input size when it has one; dynamic models follow the width selector, or the
+  // reference model's grid when that one is fixed, so the comparison stays on the same pixels.
+  function gridFor(m, width) {
+    if (m.fixed) return { width: m.width, height: m.height };
+    const ref = state.models.find(o => o.id === state.reference);
+    if (ref && ref !== m && ref.fixed) return { width: ref.width, height: ref.height };
+    return { width, height: undefined };
+  }
+  const sceneResults = () => state.models.map(m => state.results[state.scene + '|' + m.id]).filter(Boolean);
+  async function runQueue(jobs) {
+    if (state.running || !jobs.length) return;
+    state.running = true; $('run-all').disabled = true;
+    const width = parseInt($('width').value, 10), withLr = $('lr').checked, msg = $('run-msg'), bar = $('progress'); msg.classList.remove('err'); bar.classList.add('on'); bar.firstElementChild.style.width = '0%';
+    let done = 0;
+    for (const [s, m] of jobs) {
+      msg.textContent = `${done + 1}/${jobs.length}: ${m.name} su ${s.name}…`;
+      try { await runPair(s, m, width, withLr); }
+      catch (err) { msg.textContent = `${m.name} su ${s.name}: ${err.message || err}`; msg.classList.add('err'); break; }
+      done++; bar.firstElementChild.style.width = `${100 * done / jobs.length}%`;
+      renderScenes(); renderResults(); if (s.id === state.scene) { frameScene(); draw(); }
+    }
+    if (!msg.classList.contains('err')) msg.textContent = `${done} esecuzioni completate.`;
+    setTimeout(() => bar.classList.remove('on'), 800);
+    state.running = false; $('run-all').disabled = false;
+  }
+  $('run-all').addEventListener('click', () => {
+    if (!state.scenes.length || !state.models.length) { $('run-msg').textContent = 'Servono almeno una scena e un modello.'; return; }
+    const width = parseInt($('width').value, 10), lr = $('lr').checked, jobs = [];
+    for (const s of state.scenes) for (const m of state.models) { if (m.precomputed) continue; const r = state.results[s.id + '|' + m.id], g = gridFor(m, width); if (!r || r.width !== g.width || (g.height && r.height !== g.height) || (lr && !r.withLr)) jobs.push([s, m]); }
+    if (!jobs.length) { $('run-msg').textContent = 'Tutto già calcolato con queste impostazioni.'; return; }
+    runQueue(jobs);
+  });
+
+  // ---------- results ----------
+  const fmt = (v, d) => v == null ? '–' : v.toLocaleString('it-IT', { minimumFractionDigits: d, maximumFractionDigits: d });
+  function frameScene() {
+    const list = sceneResults().filter(r => state.gpu[r.key]); if (!list.length) return;
+    const zs = list.map(r => r.z_median).filter(v => v != null).sort((a, b) => a - b), zmed = zs.length ? zs[Math.floor(zs.length / 2)] : 1, g = state.gpu[list[0].key];
+    state.cam.target = [g.centroid[0], g.centroid[1], -zmed]; state.cam.dist = Math.max(0.3, zmed * 1.6);
+  }
+  function renderResults() {
+    const body = document.querySelector('#stats tbody'); body.innerHTML = '';
+    const s = state.scenes.find(o => o.id === state.scene);
+    for (const m of state.models) {
+      const r = state.results[state.scene + '|' + m.id], tr = document.createElement('tr');
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.disabled = !r; cb.checked = !!r && state.enabled.has(r.key); cb.id = 'en_' + m.id; cb.title = 'Mostra nel viewport';
+      cb.addEventListener('change', () => { cb.checked ? state.enabled.add(r.key) : state.enabled.delete(r.key); tr.classList.toggle('off', !cb.checked); draw(); });
+      tr.classList.toggle('off', !!r && !cb.checked);
+      const td0 = document.createElement('td'); td0.appendChild(cb);
+      const tdR = document.createElement('td'); const rd = document.createElement('input'); rd.type = 'radio'; rd.name = 'reference'; rd.checked = state.reference === m.id; rd.title = 'Usa come riferimento';
+      rd.addEventListener('change', () => { state.reference = m.id; for (const key of Object.keys(state.results)) updateDiff(key); renderResults(); draw(); }); tdR.appendChild(rd);
+      const td1 = document.createElement('td'); const chip = document.createElement('span'); chip.className = 'chip'; chip.style.marginRight = '6px'; chip.style.background = 'var(--s' + slotOf(m.id) + ')'; td1.append(chip, document.createTextNode(m.name));
+      tr.append(td0, tdR, td1);
+      const tdA = document.createElement('td');
+      if (r) {
+        const isRef = state.reference === m.id, dd = r.diff;
+        if (m.precomputed) { tr.insertAdjacentHTML('beforeend', `<td class="num">–</td><td>file</td><td class="num">${fmt(r.points, 0)}</td><td class="num">–</td><td class="num">${r.calibrated ? fmt(r.z_median, 3) : 'senza cal.'}</td><td class="num">${r.calibrated ? fmt(r.z_p05, 2) + ' – ' + fmt(r.z_p95, 2) : ''}</td><td class="num">${isRef ? 'rif.' : dd && dd.mae != null ? fmt(dd.mae, 2) + ' px' : '–'}</td><td class="num">${isRef ? '' : dd && dd.over1 != null ? fmt(100 * dd.over1, 1) + ' %' : '–'}</td><td class="num">${isRef ? '' : dd && dd.over3 != null ? fmt(100 * dd.over3, 1) + ' %' : '–'}</td>`); const ply = document.createElement('button'); ply.className = 'btn small ghost'; ply.type = 'button'; ply.textContent = 'scarica PLY'; ply.addEventListener('click', () => downloadPly(r, s, m)); tdA.appendChild(ply); tr.appendChild(tdA); body.appendChild(tr); continue; }
+        tr.insertAdjacentHTML('beforeend', `<td class="num">${fmt(r.ms / 1000, 2)} s</td><td>${r.backend || ''}</td><td class="num">${fmt(r.points, 0)}</td><td class="num">${r.consistent == null ? '–' : fmt(100 * r.consistent / r.points, 1) + ' %'}</td>` +
+          `<td class="num">${r.calibrated ? fmt(r.z_median, 3) : 'senza cal.'}</td><td class="num">${r.calibrated ? fmt(r.z_p05, 2) + ' – ' + fmt(r.z_p95, 2) : ''}</td>` +
+          `<td class="num">${isRef ? 'rif.' : dd && dd.mae != null ? fmt(dd.mae, 2) + ' px' : '–'}</td><td class="num">${isRef ? '' : dd && dd.over1 != null ? fmt(100 * dd.over1, 1) + ' %' : '–'}</td><td class="num">${isRef ? '' : dd && dd.over3 != null ? fmt(100 * dd.over3, 1) + ' %' : '–'}</td>`);
+        const run = document.createElement('button'); run.className = 'btn small ghost'; run.type = 'button'; run.textContent = 'riesegui'; run.addEventListener('click', () => runQueue([[s, m]]));
+        const ply = document.createElement('button'); ply.className = 'btn small ghost'; ply.type = 'button'; ply.textContent = 'scarica PLY'; ply.addEventListener('click', () => downloadPly(r, s, m));
+        tdA.append(run, ply);
+      } else {
+        tr.insertAdjacentHTML('beforeend', '<td class="num">–</td><td></td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="num"></td><td class="num">–</td><td class="num">–</td><td class="num">–</td>');
+        const run = document.createElement('button'); run.className = 'btn small'; run.type = 'button'; run.textContent = m.precomputed ? 'manca .npy' : 'esegui'; run.disabled = !s || m.precomputed; run.addEventListener('click', () => runQueue([[s, m]])); tdA.appendChild(run);
+      }
+      tr.appendChild(tdA); body.appendChild(tr);
+    }
+    renderMaps();
+    const visible = sceneResults().filter(r => state.enabled.has(r.key)).length;
+    const box = $('overlay-box'), ov = $('overlay');
+    if (!state.scenes.length && !state.models.length) { ov.hidden = false; box.innerHTML = '<strong>Trascina qui immagini stereo e modelli .onnx</strong><p>poi "Esegui tutto"</p>'; }
+    else if (!state.scenes.length) { ov.hidden = false; box.innerHTML = '<strong>Manca una coppia stereo</strong>'; }
+    else if (!state.models.length) { ov.hidden = false; box.innerHTML = '<strong>Manca un modello</strong>'; }
+    else if (!sceneResults().length) { ov.hidden = false; box.innerHTML = `<strong>${s ? s.name : 'Scena'}: nessun risultato</strong><p>"Esegui tutto" o "esegui" accanto a un modello</p>`; }
+    else ov.hidden = true;
+    const grids = [...new Set(sceneResults().map(r => r.tl.H + '×' + r.tl.W))];
+    status.textContent = s ? `${s.name} · ${visible} di ${sceneResults().length} nuvole${grids.length ? ' · ' + grids.join(', ') : ''}${grids.length > 1 ? ' (griglie diverse: scarti non confrontabili)' : ''}${s.cal.fx > 0 && s.cal.baseline > 0 ? '' : ' · senza fx/baseline: profondità in unità arbitrarie'}` : '';
+  }
+  // 2D disparity maps of the current scene, one shared scale (0 .. max p98 across models), optional Δ vs reference.
+  function mapCanvas(r, dmax, asDiff) {
+    const { tl, width, disp } = r, ref = asDiff && state.reference ? state.results[r.scene + '|' + state.reference] : null;
+    const c = document.createElement('canvas'); c.width = width; c.height = tl.nh; const ctx = c.getContext('2d'), img = ctx.createImageData(width, tl.nh), d = img.data;
+    for (let y = 0; y < tl.nh; y++) for (let x = 0; x < width; x++) {
+      const i = y * tl.W + x, o = (y * width + x) * 4, v = disp[i];
+      let t = null;
+      if (asDiff) { if (ref && v > 0 && ref.disp[i] > 0) t = Math.abs(v - ref.disp[i]) / 4; } else if (v > 0) t = v / (dmax || 1);
+      if (t == null) { d[o] = 120; d[o + 1] = 120; d[o + 2] = 120; d[o + 3] = 255; continue; }
+      const cc = ramp(t); d[o] = cc[0]; d[o + 1] = cc[1]; d[o + 2] = cc[2]; d[o + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0); return c;
+  }
+  function renderMaps() {
+    const box = $('maps'), list = sceneResults(), s = state.scenes.find(o => o.id === state.scene); box.innerHTML = '';
+    $('mapscale').hidden = !list.length; if (!list.length || !s) return;
+    const asDiff = $('mapsdiff').checked, dmax = Math.max(...list.map(r => r.d_p98 || 0));
+    $('mapmax').textContent = asDiff ? '4 px' : `${fmt(dmax, 0)} px (p98)`;
+    const first = document.createElement('div'); first.className = 'map'; const li = document.createElement('img'); li.src = s.left.url; li.alt = ''; li.style.display = 'block'; li.style.width = '100%';
+    first.appendChild(li); first.insertAdjacentHTML('beforeend', '<div class="cap"><span>immagine sinistra</span></div>'); box.appendChild(first);
+    for (const r of list) {
+      const m = modelOf(r.model), el = document.createElement('div'); el.className = 'map';
+      const key = asDiff ? 'mapDiff' : 'map';
+      if (!r[key] || r[key].dmax !== dmax || r[key].ref !== state.reference) r[key] = { canvas: mapCanvas(r, dmax, asDiff), dmax, ref: state.reference };
+      const cv = document.createElement('canvas'); cv.width = r[key].canvas.width; cv.height = r[key].canvas.height; cv.getContext('2d').drawImage(r[key].canvas, 0, 0);
+      el.appendChild(cv);
+      const cap = document.createElement('div'); cap.className = 'cap'; cap.innerHTML = `<span class="chip" style="background:var(--s${slotOf(r.model)})"></span><span></span><b></b>`;
+      cap.children[1].textContent = m ? m.name : ''; cap.children[2].textContent = asDiff ? (state.reference === r.model ? 'riferimento' : r.diff && r.diff.mae != null ? `MAE ${fmt(r.diff.mae, 2)} px` : '') : `p98 ${fmt(r.d_p98, 0)} px`;
+      el.appendChild(cap); box.appendChild(el);
+    }
+  }
+  $('mapsdiff').addEventListener('change', renderMaps);
+  function downloadPly(r, s, m) {
+    const c = r.cloud, bytes = new Uint8Array(c.n * 16), dv = new DataView(bytes.buffer);
+    for (let i = 0; i < c.n; i++) { const o = i * 16; dv.setFloat32(o, c.xyz[i * 3], true); dv.setFloat32(o + 4, c.xyz[i * 3 + 1], true); dv.setFloat32(o + 8, c.xyz[i * 3 + 2], true);
+      bytes[o + 12] = c.rgb[i * 3]; bytes[o + 13] = c.rgb[i * 3 + 1]; bytes[o + 14] = c.rgb[i * 3 + 2]; bytes[o + 15] = c.flag[i]; }
+    const header = `ply\nformat binary_little_endian 1.0\ncomment ${s.name} ${m.name} width ${r.width}\nelement vertex ${c.n}\nproperty float x\nproperty float y\nproperty float z\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nproperty uchar consistent\nend_header\n`;
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([header, bytes], { type: 'application/octet-stream' })); a.download = `${s.name}_${m.name}_${r.width}.ply`.replace(/[^\w.-]+/g, '_');
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+  renderScenes(); renderModels(); renderResults(); draw();
+})();
+</script>
+</body>
+</html>
